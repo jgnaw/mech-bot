@@ -2,7 +2,6 @@
 import math
 import mechfight as mf
 
-
 class Bot:
     name = "example-py"
 
@@ -11,6 +10,8 @@ class Bot:
         self.threat_bearing = None
         self.threat_time = 0.0
 
+    def angle_diff(self, target, current):
+        return (target - current + math.pi) % (2 * math.pi) - math.pi
     def act(self, obs: mf.Observation) -> mf.Action:
         me = obs["self"]
         x, y, z = me["pos"]
@@ -23,7 +24,11 @@ class Bot:
             act["take"] = near[0]["id"]
         enemies = sorted((m for m in obs["mechs"] if m["kind"] == "mech"), key=lambda m: math.dist(m["pos"], me["pos"]))
         yaw = math.atan2(goal[1] - y, goal[0] - x)
+        if abs(yaw - me["aim"][0] < 0.05):
+            act["fire"] = [True, True]
         act.update(move=[math.cos(yaw), math.sin(yaw)], aim=[yaw, 0.0], boost=not me["in_zone"], jump=obs["tick"] % 40 == 0)
+        if me["weapons"][0]["ammo"] < me["weapons"][0]["stats"]["mag"] and not enemies and me["weapons"][0]["reload"] == 0:
+            act["reload"] = True
         for event in obs["events"]:
             if event["type"] == "damaged" and event["bearing"] is not None:
                 self.threat_bearing = event["bearing"]
@@ -39,7 +44,33 @@ class Bot:
             py = t[1] + e_vel[1] * bullet_time
             pz = t[2] + e_vel[2] * bullet_time
             aim = [math.atan2(py - y, px - x), math.atan2(pz - z - 2.5, math.dist((px,py), (x, y)))]
-            act.update(aim=aim, fire=[True, True])
+            fire = [False, False]
+            lined_up = abs(self.angle_diff(aim[0], me["aim"][0])) < 0.05
+
+            if lined_up:
+                if e_dist < me["weapons"][0]["stats"]["range"]:
+                    fire[0] = True
+                slot1 = me["weapons"][1]
+                if slot1 is not None:
+                    kind = slot1["kind"]
+                    if kind == "lightning":
+                        if e_dist < slot1["stats"]["range"] and me["energy"] > 15:
+                            fire[1] = True
+                    elif kind == "laser":
+                        #don't fire if cooldown still active
+                        if slot1["cooldown"] > 0:
+                            fire[1] = False
+                        #if currently charging, keep charging until full and on target
+                        elif slot1["charge"] > 0:
+                            full_charge = slot1["charge"] >= slot1["stats"]["charge"]
+                            fire[1] = not (full_charge and lined_up)
+                        #start charge only with good starting conditions
+                        else:
+                            fire[1] = lined_up and e_dist < slot1["stats"]["range"]
+                    elif kind == "mortar":
+                        fire[1] = False
+
+            act.update(aim=aim, fire=fire)
             mf.draw.line([x, y, z + 7], [t[0], t[1], t[2] + 4.5], "#ff5040")
         
         mf.draw.point([goal[0], goal[1], z], "#40c0ff", 6)
