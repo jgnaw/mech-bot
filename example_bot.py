@@ -29,6 +29,7 @@ RETREAT_UNTIL = 0.85  # fight again once healed above this fraction
 FARM_RANGE = 70       # shoot crates/drones this close (so their cubes land within LOOT_RANGE)
 LOOT_RANGE = 80       # walk to cubes and wanted weapons this close
 REACH_Z = 4           # cubes/weapons more than this far above/below us are out of reach
+DROP_RANGE = 300      # go for supply drops this close (we can walk ~290 m before one lands)
 
 # Positions in observations are the target's FEET. We aim at its middle instead:
 # half of each target's height (mech 9 m, drone 3.5 m, crate 2.4 m).
@@ -96,11 +97,15 @@ class Bot:
         zone_yaw = yaw_to(me["pos"], zone["next_center"])
         act.update(move=heading(zone_yaw), aim=[zone_yaw, 0.0], boost=not me["in_zone"])
 
-        # 3. Fight the nearest visible mech, or do peaceful things if none is visible.
+        # 3. Fight weakest mech in close range, or do peaceful things if none is visible.
         enemies = sorted((m for m in obs["mechs"] if m["kind"] == "mech"),
                          key=lambda m: math.dist(m["pos"], me["pos"]))
         if enemies:
-            self.fight(obs, me, enemies[0], act)
+            weakest_e = enemies[0]
+            for e in enemies:
+                if math.dist(e["pos"], me["pos"]) < 100.0 and e.get("hp", 9999) < weakest_e["hp"]:
+                    weakest_e = e
+            self.fight(obs, me, weakest_e, act)
         else:
             self.explore(obs, me, act)
 
@@ -196,7 +201,7 @@ class Bot:
         act["boost"] = self.laser_aimed_at_me(obs, me) and me["energy"] > 20
 
     def explore(self, obs, me, act):
-        """No enemy in sight: reload, heal, collect loot, shoot crates and drones."""
+        """No enemy in sight: reload, heal, collect loot, shoot crates and drones, take supply drops."""
         # Reload during quiet moments so the next fight starts with a full magazine.
         gun = me["weapons"][0]
         if gun["kind"] == "gun" and gun["ammo"] < gun["stats"]["mag"] and gun["reload"] == 0:
@@ -226,6 +231,28 @@ class Bot:
             # Healing: walk slowly toward the zone center. 0.4 x 11.7 m/s = 4.7 m/s, just
             # under the 5 m/s where footsteps start making sound, so enemies can't hear us.
             act["move"] = heading(yaw_to(me["pos"], obs["zone"]["next_center"]), 0.4)
+
+        # Supply drop: 3 cubes + full HP + full energy for standing in its ring alone for 4 s.
+        # It beats ordinary loot, except a cube or weapon that's almost underfoot (grab that
+        # first, it only takes a moment). It also beats slow-walking while retreating, since
+        # the drop heals us fully - much faster than regen.
+        drop = self.drop_target(obs, me)
+        if drop and not (loot and math.dist(loot, me["pos"]) < 15):
+            drop_yaw = yaw_to(me["pos"], drop["pos"])
+            # Aim for a point well inside the 8 m ring, not its edge, so strafing-sized
+            # wobbles don't knock us out of it and reset the capture clock.
+            if math.dist(drop["pos"][:2], me["pos"][:2]) > drop["radius"] - 3:
+                act["move"] = heading(drop_yaw)
+                if not target:
+                    act["aim"] = [drop_yaw, 0.0]
+            else:
+                # Inside the ring: stand still (also silent: no footsteps) and slowly turn
+                # the torso in a full circle, so we see anyone sneaking up from behind.
+                # 1.5 rad/s means one full look-around every ~4 s, about the capture time.
+                act["move"] = [0.0, 0.0]
+                if not target:
+                    act["aim"] = [(obs["t"] * 1.5) % (2 * math.pi), 0.0]
+            mf.draw.point([*drop["pos"][:2], me["pos"][2]], "#ffd060", 8)
 
         # Your threat logic: hit by someone we can't see in the last 2 s -> turn to face them
         # (rear hits do 1.5x damage, and turning lets us see them). This comes last so it
@@ -293,6 +320,20 @@ class Bot:
                  if math.dist(s, me["pos"]) < LOOT_RANGE and abs(s[2] - z) < REACH_Z
                  and in_zone(s, obs["zone"])]
         return min(spots, key=lambda s: math.dist(s, me["pos"]), default=None)
+
+    def drop_target(self, obs, me):
+        """The nearest supply drop worth going for, or None.
+
+        A drop is called 25 s before it lands, and every mech can see it in obs["drops"] from
+        that moment. We go for one if:
+          - it's within DROP_RANGE (walking speed ~11.7 m/s covers ~290 m in those 25 s), and
+          - nobody else is capturing it (holder is None, or it's us). If another mech holds
+            it, the ring is contested: there's an enemy right there, so it's not free loot.
+        """
+        options = [d for d in obs["drops"]
+                   if math.dist(d["pos"][:2], me["pos"][:2]) < DROP_RANGE
+                   and d["holder"] in (None, me["id"])]
+        return min(options, key=lambda d: math.dist(d["pos"][:2], me["pos"][:2]), default=None)
 
     def laser_aimed_at_me(self, obs, me):
         """True if a visible mech is charging a laser pointed roughly at us."""
