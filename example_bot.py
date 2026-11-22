@@ -29,7 +29,7 @@ RETREAT_UNTIL = 0.85  # fight again once healed above this fraction
 FARM_RANGE = 70       # shoot crates/drones this close (so their cubes land within LOOT_RANGE)
 LOOT_RANGE = 80       # walk to cubes and wanted weapons this close
 REACH_Z = 4           # cubes/weapons more than this far above/below us are out of reach
-DROP_RANGE = 300      # go for supply drops this close (we can walk ~290 m before one lands)
+DROP_RANGE = 0        # go for supply drops this close (we can walk ~290 m before one lands)
 
 # Positions in observations are the target's FEET. We aim at its middle instead:
 # half of each target's height (mech 9 m, drone 3.5 m, crate 2.4 m).
