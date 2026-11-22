@@ -29,7 +29,7 @@ RETREAT_UNTIL = 0.85  # fight again once healed above this fraction
 FARM_RANGE = 70       # shoot crates/drones this close (so their cubes land within LOOT_RANGE)
 LOOT_RANGE = 80       # walk to cubes and wanted weapons this close
 REACH_Z = 4           # cubes/weapons more than this far above/below us are out of reach
-DROP_RANGE = 0        # go for supply drops this close (we can walk ~290 m before one lands)
+DROP_RANGE = 300      # go for supply drops this close (we can walk ~290 m before one lands)
 
 # Positions in observations are the target's FEET. We aim at its middle instead:
 # half of each target's height (mech 9 m, drone 3.5 m, crate 2.4 m).
@@ -97,15 +97,18 @@ class Bot:
         zone_yaw = yaw_to(me["pos"], zone["next_center"])
         act.update(move=heading(zone_yaw), aim=[zone_yaw, 0.0], boost=not me["in_zone"])
 
-        # 3. Fight weakest mech in close range, or do peaceful things if none is visible.
+        # 3. Fight the nearest visible mech, or do peaceful things if none is visible.
         enemies = sorted((m for m in obs["mechs"] if m["kind"] == "mech"),
                          key=lambda m: math.dist(m["pos"], me["pos"]))
         if enemies:
-            weakest_e = enemies[0]
-            for e in enemies:
-                if math.dist(e["pos"], me["pos"]) < 100.0 and e.get("hp", 9999) < weakest_e["hp"]:
-                    weakest_e = e
-            self.fight(obs, me, weakest_e, act)
+            # Weakest-in-100-m targeting (scored 2.43-2.5 vs 2.7 for nearest), kept for a
+            # possible "sticky target" version: re-picking every tick likely made the torso
+            # flip between enemies, so it stopped firing while turning.
+            # weakest_e = enemies[0]
+            # for e in enemies:
+            #     if math.dist(e["pos"], me["pos"]) < 100.0 and e.get("hp", 9999) < weakest_e["hp"]:
+            #         weakest_e = e
+            self.fight(obs, me, enemies[0], act)
         else:
             self.explore(obs, me, act)
 
