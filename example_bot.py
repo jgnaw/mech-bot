@@ -8,6 +8,8 @@ class Bot:
 
     def __init__(self, hello: mf.Hello):
         self.reach = hello["config"]["loot"]["pickup_radius"]
+        self.threat_bearing = None
+        self.threat_time = 0.0
 
     def act(self, obs: mf.Observation) -> mf.Action:
         me = obs["self"]
@@ -22,6 +24,12 @@ class Bot:
         enemies = sorted((m for m in obs["mechs"] if m["kind"] == "mech"), key=lambda m: math.dist(m["pos"], me["pos"]))
         yaw = math.atan2(goal[1] - y, goal[0] - x)
         act.update(move=[math.cos(yaw), math.sin(yaw)], aim=[yaw, 0.0], boost=not me["in_zone"], jump=obs["tick"] % 40 == 0)
+        for event in obs["events"]:
+            if event["type"] == "damaged" and event["bearing"] is not None:
+                self.threat_bearing = event["bearing"]
+                self.threat_time = obs["t"]
+        if not enemies and self.threat_bearing is not None and obs["t"] - self.threat_time < 2:
+            act["aim"] = [self.threat_bearing, 0.0]
         if enemies:
             t = enemies[0]["pos"]
             e_dist = math.dist(t, (x,y,z))
@@ -33,6 +41,7 @@ class Bot:
             aim = [math.atan2(py - y, px - x), math.atan2(pz - z - 2.5, math.dist((px,py), (x, y)))]
             act.update(aim=aim, fire=[True, True])
             mf.draw.line([x, y, z + 7], [t[0], t[1], t[2] + 4.5], "#ff5040")
+        
         mf.draw.point([goal[0], goal[1], z], "#40c0ff", 6)
         mf.draw.label(f"hp {me['hp']:.0f} · {len(enemies)} in sight")
         return act
